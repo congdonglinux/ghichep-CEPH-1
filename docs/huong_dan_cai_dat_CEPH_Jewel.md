@@ -8,6 +8,10 @@ Mục lục:
   - [2.1. Thiết lập ip, hostname cho các máy chủ CEPH1](#2.1)
   - [2.2. Thiết lập ip, hostname cho các máy chủ CEPH2](#2.2)
   - [2.3. Thiết lập ip, hostname cho các máy chủ CEPH3](#2.3)
+- [3. Cài đặt CEPH lên các máy chủ.](#3)
+  - [3.1. Cài đặt CEPH trên node `ceph1`](#3.1)
+  - [3.2. Cài đặt CEPH trên node `ceph2`](#3.2)
+  - [3.3. Cài đặt CEPH trên node `ceph2`](#3.3)
 
 ========================
 
@@ -222,7 +226,7 @@ EOF
 ```
 
 
-
+<a name="3"></a>
 ## 3. Cài đặt CEPH lên các máy chủ.
 - Các bước chính cài đặt CEPH 
 - Thực hiện cài đặt repos cho CEPH trên cả 03 node
@@ -280,92 +284,95 @@ root@ceph1:~# cat /etc/ceph/rbdmap
 root@ceph1:~#
 ```
 
+<a name="3.1"></a>
 ### 3.1. Cài đặt CEPH trên node `ceph1`
 - Các thành phần được cài trên node `ceph1` như sau:
 
 - Tạo fSID cho cụm CEPH, output của lệnh này sẽ sử dụng cho file cấu hình của CEPH `/etc/ceph/ceph.conf`
-```sh
-uuidgen
-```
+  ```sh
+  uuidgen
+  ```
 	- Kết quả của lệnh trên
-	```sh
-	071aae0e-f9c5-44e0-8c3b-445d171cc496
-	```
+    ```sh
+    071aae0e-f9c5-44e0-8c3b-445d171cc496
+    ```
 	
 - Tạo file cấu hình cho CEPH `/etc/ceph/ceph.conf`
 - Sử dụng kết quả ở lệnh `uuidgen` để đưa vào file cấu hình ở dưới (lưu ý với hệ thống của bạn thì kết quả này sẽ khác nhau)
+  ```sh 
+  cat << EOF > /etc/ceph/ceph.conf
+  [global]
+  public network = 172.16.69.0/24
+  cluster network = 10.10.30.0/24
+  fsid = 071aae0e-f9c5-44e0-8c3b-445d171cc496
 
-```sh 
-cat << EOF > /etc/ceph/ceph.conf
-[global]
-public network = 172.16.69.0/24
-cluster network = 10.10.30.0/24
-fsid = 071aae0e-f9c5-44e0-8c3b-445d171cc496
+  osd pool default min size = 1
+  osd pool default pg num = 128
+  osd pool default pgp num = 128
+  osd journal size = 5000
 
-osd pool default min size = 1
-osd pool default pg num = 128
-osd pool default pgp num = 128
-osd journal size = 5000
+  [mon]
+  mon host = ceph1
+  mon addr = 172.16.69.61
+  mon initial members = ceph1
 
-[mon]
-mon host = ceph1
-mon addr = 172.16.69.61
-mon initial members = ceph1
+  [mon.ceph1]
+  host = ceph1
+  mon addr = 172.16.69.61
 
-[mon.ceph1]
-host = ceph1
-mon addr = 172.16.69.61
+  [mds]
+  mds data = /var/lib/ceph/mds/mds.ceph1
+  keyring = /var/lib/ceph/mds/mds.ceph1/mds.ceph1.keyring
 
-[mds]
-mds data = /var/lib/ceph/mds/mds.ceph1
-keyring = /var/lib/ceph/mds/mds.ceph1/mds.ceph1.keyring
-
-[mds.ceph1]
-host = ceph1
-EOF
-```
+  [mds.ceph1]
+  host = ceph1
+  EOF
+  ```
 
 - Tạo keyring cho cụm CEPH và sinh ra một monitor key.
-```sh
-ceph-authtool --create-keyring /tmp/ceph.mon.keyring --gen-key -n mon. --cap mon 'allow *'
-```
+  ```sh
+  ceph-authtool --create-keyring /tmp/ceph.mon.keyring --gen-key -n mon. --cap mon 'allow *'
+  ```
 
 - Generate an administrator keyring, generate a `client.admin` user and add the user to the keyring.
-```sh
-sudo ceph-authtool --create-keyring /etc/ceph/ceph.client.admin.keyring --gen-key -n client.admin --set-uid=0 --cap mon 'allow *' --cap osd 'allow *' --cap mds 'allow'
-```
+  ```sh
+  sudo ceph-authtool --create-keyring /etc/ceph/ceph.client.admin.keyring --gen-key -n client.admin --set-uid=0 --cap mon 'allow *' --cap osd 'allow *' --cap mds 'allow'
+  ```
 
 - Add the client.admin key to the ceph.mon.keyring
-```sh
-ceph-authtool /tmp/ceph.mon.keyring --import-keyring /etc/ceph/ceph.client.admin.keyring
-```
+  ```sh
+  ceph-authtool /tmp/ceph.mon.keyring --import-keyring /etc/ceph/ceph.client.admin.keyring
+  ```
 
 - Tạo Generate a monitor map using the `hostname(s)`, `host IP address(es)` and the `FSID`. Save it as `/tmp/monmap`
-```sh
-monmaptool --create --add ceph1 172.16.69.61 --fsid 071aae0e-f9c5-44e0-8c3b-445d171cc496 /tmp/monmap
-```
+  ```sh
+  monmaptool --create --add ceph1 172.16.69.61 --fsid 071aae0e-f9c5-44e0-8c3b-445d171cc496 /tmp/monmap
+  ```
 
 - Create a default data directory (or directories) on the monitor host(s).
-```sh
-sudo mkdir /var/lib/ceph/mon/ceph-ceph1
+  ```sh
+  sudo mkdir /var/lib/ceph/mon/ceph-ceph1
+  ```
 
 - Populate the monitor daemon(s) with the monitor map and keyring.
-```sh
-ceph-mon --mkfs -i ceph1 --monmap /tmp/monmap --keyring /tmp/ceph.mon.keyring
-```
+  ```sh
+  ceph-mon --mkfs -i ceph1 --monmap /tmp/monmap --keyring /tmp/ceph.mon.keyring
+  ```
 
 - Khởi động CEPH trên `ceph1` và phân quyền.
-```sh
-service ceph start 
+  ```sh
+  service ceph start 
 
-chown -R ceph:ceph /var/run/ceph
-chown -R ceph:ceph /var/lib/ceph/mon/ceph-ceph1
+  chown -R ceph:ceph /var/run/ceph
+  chown -R ceph:ceph /var/lib/ceph/mon/ceph-ceph1
 
-service ceph restart
-```
+  service ceph restart
+  ```
 
+<a name="3.2"></a>
 ### 3.2. Cài đặt CEPH trên node `ceph2`
 - Các thành phần được cài trên CEPH2
 
+<a name="3.3"></a>
 ### 3.3. Cài đặt CEPH trên node `ceph3`
 - Các thành phần được cài trên CEPH3
